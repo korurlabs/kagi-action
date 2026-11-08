@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: korurlabs/kagi-action@<full commit sha> # v2
+      - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
 
       - run: ./deploy.sh   # the secret set is now in this step's environment
 ```
@@ -26,8 +26,8 @@ jobs:
 The step needs no inputs. Kagi finds the binding from the job's own claims (repository, workflow,
 ref, event, environment), so there is no binding id to copy into the workflow.
 
-Pin the action to a full commit SHA and keep the tag in a comment, as above. A tag can be moved; a
-commit cannot, and this action handles your secrets.
+Pin the action to a full commit SHA and keep its release tag in a comment, as above. This action
+handles your secrets, and a commit SHA names exactly one tree of code. See [Versioning](#versioning).
 
 ## What the action does
 
@@ -57,7 +57,7 @@ actions. To give it to one command only, install the CLI without pulling and wra
 `kagi run`:
 
 ```yaml
-      - uses: korurlabs/kagi-action@<full commit sha> # v2
+      - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
         with:
           pull: 'false'
 
@@ -145,12 +145,16 @@ rewrites `src/cli-release.json`. Review the diff and commit it.
 
 | Reference | Meaning |
 |---|---|
-| `@<full commit sha> # v2` | Exact commit. Immutable. Recommended. |
-| `@v2.0.0` | Exact release tag. |
-| `@v2` | Floating major tag, moved to each new `v2.x.y` release. |
+| `@<full commit sha> # v2.x.y` | Exact commit. Recommended. |
+| `@v2.x.y`, for example `@v2.0.0` | Exact release tag. |
+| `@v2` | The first v2 release, `v2.0.0`. It never moves, so it never receives a fix. |
 
-Breaking changes only ship in a new major version, and the floating major tag is never moved onto
-a prerelease.
+This repository never moves a release tag, and that includes `v2`: it is created once, on the
+commit of `v2.0.0`. A fix ships as a new `v2.x.y` tag, and a workflow gets it by changing its pin.
+Pin a full commit SHA or a `v2.x.y` tag. Breaking changes ship only in a new major version.
+
+A release is only cut from a commit on `main`; the release workflow refuses a tag on any other
+commit.
 
 ## Development
 
