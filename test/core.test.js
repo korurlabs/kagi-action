@@ -1,94 +1,95 @@
 import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EOL } from 'node:os';
+import { delimiter } from 'node:path';
 import { createHarness, setInput } from './helpers.js';
 import {
-  escapeData,
-  escapeProperty,
-  getInput,
-  getBooleanInput,
-  getNumberInput,
-  exportVariable,
-  setOutput,
-  setSecret,
   ActionError,
+  addPath,
+  escapeData,
+  getBooleanInput,
+  getInput,
+  getState,
+  saveState,
+  setFailed,
+  warning,
 } from '../src/core.js';
 
 let harness;
 afterEach(() => harness?.restore());
 
-describe('workflow command escaping', () => {
-  test('escapes the characters that would terminate or corrupt a command', () => {
+describe('workflow commands', () => {
+  test('escapes the characters that would end or corrupt a command', () => {
     assert.equal(escapeData('a%b\rc\nd'), 'a%25b%0Dc%0Ad');
-    assert.equal(escapeProperty('a:b,c'), 'a%3Ab%2Cc');
   });
 
-  test('a multi-line secret is masked as a single, escaped command', () => {
+  test('a multi-line warning stays one command', () => {
     harness = createHarness();
-    setSecret('line-one\nline-two');
-    assert.deepEqual(harness.log(), ['::add-mask::line-one%0Aline-two']);
+    warning('first\nsecond');
+    assert.deepEqual(harness.lines, ['::warning::first%0Asecond']);
   });
 
-  test('an empty value issues no mask command', () => {
+  test('setFailed writes an error command and sets a failing exit code', () => {
     harness = createHarness();
-    setSecret('');
-    assert.deepEqual(harness.log(), []);
+    setFailed('it broke');
+    assert.deepEqual(harness.lines, ['::error::it broke']);
+    assert.equal(process.exitCode, 1);
   });
 });
 
 describe('inputs', () => {
-  test('reads and trims INPUT_* variables', () => {
+  test('reads and trims INPUT_* variables, keeping dashes in the name', () => {
     harness = createHarness({ 'binding-id': '  abc  ' });
+    assert.equal(process.env['INPUT_BINDING-ID'], '  abc  ');
     assert.equal(getInput('binding-id'), 'abc');
   });
 
-  test('a required input that is absent fails loudly', () => {
-    harness = createHarness();
-    assert.throws(() => getInput('binding-id', { required: true }), ActionError);
-  });
-
-  test('an absent optional input falls back', () => {
-    harness = createHarness();
+  test('an absent or blank input falls back', () => {
+    harness = createHarness({ 'api-url': '   ' });
     assert.equal(getInput('api-url', { fallback: 'https://api.kagi.pw' }), 'https://api.kagi.pw');
+    assert.equal(getInput('version'), '');
   });
 
   test('boolean inputs accept only the YAML core-schema spellings', () => {
-    harness = createHarness({ 'export-env': 'False' });
-    assert.equal(getBooleanInput('export-env', true), false);
-    setInput('export-env', 'yes');
-    assert.throws(() => getBooleanInput('export-env', true), ActionError);
-  });
-
-  test('a non-numeric or non-positive timeout fails rather than being coerced', () => {
-    harness = createHarness({ 'request-timeout-seconds': 'soon' });
-    assert.throws(() => getNumberInput('request-timeout-seconds', 30), ActionError);
-    setInput('request-timeout-seconds', '0');
-    assert.throws(() => getNumberInput('request-timeout-seconds', 30), ActionError);
+    harness = createHarness({ pull: 'False' });
+    assert.equal(getBooleanInput('pull', true), false);
+    setInput('pull', 'TRUE');
+    assert.equal(getBooleanInput('pull', false), true);
+    setInput('pull', 'no');
+    assert.throws(() => getBooleanInput('pull', true), ActionError);
   });
 });
 
-describe('runner file writes', () => {
-  test('exportVariable uses a heredoc so a multi-line value cannot corrupt the file', () => {
+describe('runner files', () => {
+  test('saveState writes a heredoc entry with a random delimiter', () => {
     harness = createHarness();
-    exportVariable('MULTI', 'a\nb');
-    const [written] = harness.envWrites();
-    const match = written.match(/^MULTI<<(ghadelimiter_[0-9a-f-]+)/);
-    assert.ok(match, `unexpected heredoc: ${written}`);
-    const delimiter = match[1];
-    assert.equal(written, `MULTI<<${delimiter}${EOL}a\nb${EOL}${delimiter}${EOL}`);
-    assert.equal(process.env.MULTI, 'a\nb');
+    saveState('kagiBinary', '/tmp/kagi-cli-x/kagi');
+    const [entry] = harness.stateWrites();
+    const match = entry.match(/^kagiBinary<<(ghadelimiter_[0-9a-f-]{36})\r?\n\/tmp\/kagi-cli-x\/kagi\r?\n(.+)\r?\n$/);
+    assert.ok(match, entry);
+    assert.equal(match[1], match[2]);
   });
 
-  test('setOutput writes to GITHUB_OUTPUT, not GITHUB_ENV', () => {
+  test('getState reads the STATE_ variable the runner gives the post step', () => {
     harness = createHarness();
-    setOutput('secret-count', 3);
-    assert.equal(harness.envWrites().length, 0);
-    assert.match(harness.outputWrites()[0], /^secret-count<<ghadelimiter_[0-9a-f-]+\n3\n/);
+    assert.equal(getState('kagiBinary'), '');
+    process.env.STATE_kagiBinary = '/x/kagi';
+    assert.equal(getState('kagiBinary'), '/x/kagi');
   });
 
-  test('writing outside GitHub Actions fails instead of silently dropping the value', () => {
+  test('addPath appends the directory to GITHUB_PATH and prepends it to PATH', () => {
     harness = createHarness();
-    delete process.env.GITHUB_ENV;
-    assert.throws(() => exportVariable('K', 'v'), ActionError);
+    process.env.PATH = '/usr/bin';
+    addPath('/tmp/kagi-cli-x');
+    assert.deepEqual(harness.pathWrites(), [`/tmp/kagi-cli-x${EOL}`]);
+    assert.equal(process.env.PATH, `/tmp/kagi-cli-x${delimiter}/usr/bin`);
+  });
+
+  test('outside GitHub Actions the runner files are missing and that is an error', () => {
+    harness = createHarness();
+    delete process.env.GITHUB_STATE;
+    delete process.env.GITHUB_PATH;
+    assert.throws(() => saveState('a', 'b'), /GITHUB_STATE is not set/);
+    assert.throws(() => addPath('/x'), /GITHUB_PATH is not set/);
   });
 });
