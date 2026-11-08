@@ -16,12 +16,13 @@ jobs:
   # The action has no dependencies, so there is nothing to install and nothing to bundle: what is
   # in src/ is exactly what runs on a customer's runner. action.yml declares `using: node24`, so
   # GitHub always executes this action on the Node 24 runtime no matter what else is installed on
-  # the runner. A Node 20 leg would test an environment this action can never run in — and it
+  # the runner. A Node 20 leg would test an environment this action can never run in, and it
   # fails, because `node --test` did not gain glob expansion until Node 22 and the test script
   # uses a `test/**/*.test.js` pattern.
   test:
     name: unit tests (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -35,49 +36,80 @@ jobs:
 
       - run: npm test
 
-  # Runs the real action on a real runner against a local stand-in for GitHub's token service and
-  # the Kagi API. This is the only place the runner's own INPUT_* wiring, the node24 runtime, and
-  # the real $GITHUB_ENV are exercised. It deliberately does NOT request id-token: write, so the
-  # only token-service variables in play are the ones pointed at the stand-in below.
+  # Runs the real action on a real runner: the real download of the pinned Kagi CLI and its
+  # checksum check, the real CLI in CI mode, the runner's own INPUT_* wiring, $GITHUB_ENV, $GITHUB_PATH
+  # and the post step. GitHub's token service and the Kagi API are replaced by test/e2e-server.js.
+  # The job deliberately does NOT request id-token: write, so the only token-service variables in
+  # play are the ones the steps below point at the stand-in.
+  #
+  # Each leg exercises a different archive of the pinned release, which only that platform can
+  # download and run: linux_amd64, linux_arm64 and darwin_arm64.
   smoke:
-    name: end-to-end smoke test
-    runs-on: ubuntu-latest
+    name: end-to-end smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start the stand-in OIDC + Kagi server
+      # Only for the stand-in server; the action itself runs on the runner's own node24.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Start the stand-in token service and Kagi API
         run: |
           node test/e2e-server.js &
           for _ in $(seq 1 50); do
             [ -f e2e-endpoints.env ] && break
             sleep 0.1
           done
+          test -f e2e-endpoints.env
           cat e2e-endpoints.env >> "$GITHUB_ENV"
 
-      - name: Run the action
-        id: kagi
+      - name: Install the CLI without pulling
         uses: ./
         with:
-          binding-id: 3fa2c1e0-0000-4000-8000-000000000000
+          pull: 'false'
+
+      # kagi run fetches the set itself and hands it to its command only.
+      - name: kagi run hands the set to one command
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
+          KAGI_API_URL: ${{ env.E2E_API_URL }}
+        run: |
+          set -euo pipefail
+          command -v kagi
+          kagi run -- sh -c 'test "$E2E_SECRET" = "$E2E_SECRET_VALUE"'
+          test -z "${E2E_SECRET:-}"
+
+      - name: Run the action
+        uses: ./
+        with:
           api-url: ${{ env.E2E_API_URL }}
-          env-file-path: build/.env
         env:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
 
-      - name: The secrets are in the environment and in the .env file
+      - name: The secret set is in the environment of later steps
         run: |
           set -euo pipefail
           test "$E2E_SECRET" = "$E2E_SECRET_VALUE"
           test "$E2E_MULTILINE" = "$(printf 'first-line\nsecond-line')"
-          test "${{ steps.kagi.outputs.secret-count }}" = "2"
-          test "${{ steps.kagi.outputs.scope-count }}" = "1"
-          grep -q 'E2E_SECRET="' build/.env
-          test "$(stat -c '%a' build/.env)" = "600"
+          # The single-use Kagi token stays in the CLI's memory and never reaches a later step.
+          if env | grep -q 'e2e-kagi-token-'; then
+            echo "::error::The Kagi token reached the environment of a later step."
+            exit 1
+          fi
 
-      # The reserved routing id below makes the stand-in answer with the same opaque 401 the real
-      # endpoint uses. The step must fail; it must never continue the job without its secrets.
-      - name: A denied fetch fails the step
+      # The reserved binding id below makes the stand-in refuse the exchange with a 401, as Kagi
+      # does for a job no binding accepts. The step must fail; it must never let the job continue
+      # without its secrets.
+      - name: A refused job fails the step
         id: denied
         continue-on-error: true
         uses: ./
@@ -89,28 +121,36 @@ jobs:
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
 
       - name: ...and the failure was loud, not silent
-        run: |
-          test "${{ steps.denied.outcome }}" = "failure"
+        env:
+          OUTCOME: ${{ steps.denied.outcome }}
+        run: test "$OUTCOME" = "failure"
 
   # An action's metadata is only validated when a workflow tries to use it, which is far too late
   # for a customer. Parsing it here fails the PR instead.
   metadata:
     name: action.yml is valid
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Parse action.yml and check the entry point exists
+      - name: Parse action.yml and check the entry points exist
         run: |
           python3 - <<'PY'
-          import sys, pathlib
+          import json, pathlib, sys
           try:
               import yaml
           except ImportError:
               sys.exit("pyyaml missing")
           spec = yaml.safe_load(pathlib.Path("action.yml").read_text())
-          assert spec["runs"]["using"].startswith("node"), spec["runs"]["using"]
-          main = pathlib.Path(spec["runs"]["main"])
-          assert main.is_file(), f"{main} does not exist"
-          assert "binding-id" in spec["inputs"]
-          print("action.yml OK:", spec["runs"]["using"], spec["runs"]["main"])
+          runs = spec["runs"]
+          assert runs["using"] == "node24", runs["using"]
+          for key in ("main", "post"):
+              entry = pathlib.Path(runs[key])
+              assert entry.is_file(), f"runs.{key}: {entry} does not exist"
+          # A job with id-token: write must need no input at all.
+          for name, data in spec.get("inputs", {}).items():
+              assert not data.get("required", False), f"input {name} is required"
+          release = json.loads(pathlib.Path("src/cli-release.json").read_text())
+          assert len(release["assets"]) == 4, release
+          print("action.yml OK:", runs["using"], runs["main"], runs["post"], "CLI", release["version"])
           PY

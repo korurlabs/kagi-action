@@ -9,11 +9,13 @@ permissions:
   contents: write
 
 jobs:
-  # Gate: customers pin @v1, which is a MOVING tag. Moving it onto a broken commit breaks every
-  # pipeline that uses this action at once, so the tests run before anything is published.
+  # Gate: customers can pin the major tag, which is a MOVING tag. Moving it onto a broken commit
+  # breaks every pipeline that uses this action at once, so the tests run before anything is
+  # published.
   test:
     name: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,9 +23,33 @@ jobs:
           node-version: '24'
       - run: npm test
 
+  # Gate: the action runs `kagi pull --github-env` and, in its post step, `kagi ci revoke`. A CLI
+  # release from before CI mode has neither, so a tag whose src/cli-release.json pins one would
+  # ship an action that fails in every job. This installs the pinned CLI through the action itself
+  # and runs both commands; `kagi ci revoke` exits 0 when there is nothing to revoke.
+  cli-ci-mode:
+    name: the pinned Kagi CLI has CI mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned CLI
+        uses: ./
+        with:
+          pull: 'false'
+
+      - name: Check the CLI has the commands the action runs
+        run: |
+          set -euo pipefail
+          kagi --version
+          kagi ci revoke
+          help="$(kagi pull --help)"
+          grep -q -- '--github-env' <<<"$help"
+
   release:
     name: publish and move the major tag
-    needs: test
+    needs: [test, cli-ci-mode]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,10 +80,13 @@ jobs:
       - name: Verify the published tree is a usable action
         run: |
           set -euo pipefail
-          # The tag is what customers fetch; if the entry point named by action.yml is not in the
+          # The tag is what customers fetch; if an entry point named by action.yml is not in the
           # tree, every consumer fails at step start with an unhelpful runner error.
           test -f action.yml
-          test -f "$(python3 -c "import yaml,pathlib;print(yaml.safe_load(pathlib.Path('action.yml').read_text())['runs']['main'])")"
+          for key in main post; do
+            test -f "$(python3 -c "import sys,yaml,pathlib;print(yaml.safe_load(pathlib.Path('action.yml').read_text())['runs'][sys.argv[1]])" "$key")"
+          done
+          test -f src/cli-release.json
 
       - name: Move the floating major tag
         if: steps.version.outputs.prerelease == 'false'
@@ -68,7 +97,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          # Annotated, and force-moved: v1 is documented as tracking the latest v1.x.y.
+          # Annotated, and force-moved: the major tag is documented as tracking its latest release.
           git tag -f -a "$MAJOR" -m "$MAJOR tracks the latest $MAJOR release (currently $TAG)"
           git push --force origin "refs/tags/$MAJOR"
 
