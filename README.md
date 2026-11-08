@@ -155,6 +155,8 @@ and commit it.
 This repository never moves a release tag, and that includes `v2`: it is created once, on the
 commit of `v2.0.0`. A fix ships as a new `v2.x.y` tag, and a workflow gets it by changing its pin.
 Pin a full commit SHA or a `v2.x.y` tag. Breaking changes ship only in a new major version.
+Dependabot with `package-ecosystem: github-actions` opens a pull request for a pinned action when
+a new release ships, and it updates the version comment next to a SHA.
 
 A release is only cut from a commit on `main`; the release workflow refuses a tag on any other
 commit.
