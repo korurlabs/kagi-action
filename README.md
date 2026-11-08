@@ -138,8 +138,11 @@ To move to another CLI release:
 scripts/pin-cli.sh <version>   # for example: scripts/pin-cli.sh 0.31.1
 ```
 
-The script downloads the release's checksums file and each archive, checks that both agree, and
-rewrites `src/cli-release.json`. Review the diff and commit it.
+The script downloads the release's checksums file and each archive, and reads the SHA-256 digest
+GitHub records for each of them from the releases API. It rewrites `src/cli-release.json` only when,
+for every archive, the checksums file, GitHub's digest and the downloaded bytes agree, and it refuses
+when GitHub has no digest for an archive. It needs the GitHub CLI (`gh`), signed in. Review the diff
+and commit it.
 
 ## Versioning
 
