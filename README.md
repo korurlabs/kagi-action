@@ -82,7 +82,7 @@ Every input is optional.
 | Input | Default | Description |
 |---|---|---|
 | `binding-id` | none | The id of the Kagi CI binding to evaluate. Leave it unset; it is needed only for a binding that pins its own audience, which Kagi reaches by its id. It is a reference, not a credential. |
-| `audience` | the CLI's default, `api.kagi.pw` | Audience of the GitHub id-token. Set it, together with `binding-id`, only for a binding with a custom audience. |
+| `audience` | the host of `api-url` (`api.kagi.pw` by default) | Audience of the GitHub id-token. Set it, together with `binding-id`, only for a binding with a custom audience. |
 | `api-url` | `https://api.kagi.pw` | Kagi API root. Change it only for a self-hosted Kagi. It must use `https`; plain `http` is accepted only for a server on the runner itself (`localhost`, `127.0.0.1`, `[::1]`). |
 | `version` | the pinned version | Kagi CLI version to install. Any version other than the pinned one is refused, because the action has no checksum for it. |
 | `pull` | `true` | Run `kagi pull --github-env`. Set it to `false` to only install the CLI, see [Limiting the secrets to one command](#limiting-the-secrets-to-one-command). |

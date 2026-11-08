@@ -19,7 +19,7 @@ inputs:
     default: ''
   audience:
     description: >-
-      Audience of the GitHub id-token. Leave it unset to use the Kagi CLI's default (api.kagi.pw).
+      Audience of the GitHub id-token. Leave it unset to use the Kagi CLI's default, the host of api-url (api.kagi.pw by default).
       Set it, together with binding-id, only for a binding that pins its own expected audience.
     required: false
     default: ''
