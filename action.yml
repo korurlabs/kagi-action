@@ -2,7 +2,7 @@ name: 'Kagi Secrets'
 description: >-
   Load the secret set Kagi grants this workflow, with the job's own OIDC id-token. No stored
   credential: installs the checksum-verified Kagi CLI and runs its CI mode.
-author: 'Sensey Labs'
+author: 'Korur'
 
 branding:
   icon: 'key'
