@@ -1,61 +1,51 @@
 name: 'Kagi Secrets'
-description: 'Fetch Kagi secrets into your workflow using its own OIDC id-token. No stored credential, no CLI download.'
-author: 'Sensey Labs'
+description: >-
+  Load the secrets this workflow's Kagi CI binding gives, with the job's own OIDC id-token. No
+  stored credential: installs the checksum-verified Kagi CLI and runs its CI mode.
+author: 'Korur'
 
 branding:
-  icon: 'key'
+  icon: 'lock'
   color: 'purple'
 
+# Every input is optional: a job with `permissions: id-token: write` needs none of them.
 inputs:
   binding-id:
     description: >-
-      The CI binding's routing id (bindingId), copied from the Kagi portal. It is a reference, not
-      a credential: it selects which binding is evaluated and grants nothing by itself, and every
-      grant is derived from the verified claims in the id-token.
-    required: true
-  api-url:
-    description: >-
-      Kagi API root. Only change this for a self-hosted (ENTERPRISE) Kagi deployment.
+      The id of the Kagi CI binding to evaluate. Leave it unset: Kagi finds the binding from the
+      job's own claims. Needed only for a binding with a custom audience, which Kagi reaches only by
+      its id. It is a reference, not a credential.
     required: false
-    default: 'https://api.kagi.pw'
+    default: ''
   audience:
     description: >-
-      OIDC audience to request the id-token at. Must match the binding's expectedAudience exactly
-      when it pins one; leave unset otherwise. The verifier requires an exact, single-valued
-      audience, so this is never unconstrained.
+      Audience of the GitHub id-token. Leave it unset to use the Kagi CLI's default, the host of api-url (api.kagi.pw by default).
+      Set it, together with binding-id, only for a binding that pins its own expected audience.
     required: false
-    default: 'api.kagi.pw'
-  export-env:
+    default: ''
+  api-url:
     description: >-
-      Write every fetched secret into $GITHUB_ENV, so later steps in the same job see them as
-      environment variables.
+      Kagi API root. Change it only for a self-hosted Kagi deployment. Must be https.
+    required: false
+    default: 'https://api.kagi.pw'
+  version:
+    description: >-
+      Kagi CLI version to install. Leave it unset to install the version this action release pins.
+      Any other version is refused, because the action has no checksum for it.
+    required: false
+    default: ''
+  pull:
+    description: >-
+      Run `kagi pull --github-env`, which puts the binding's secrets into the environment of every
+      later step of this job. Set it to false to only install the CLI, and run
+      `kagi run -- <command>` in the step that needs the secrets, which hands them to that one
+      command.
     required: false
     default: 'true'
-  env-file-path:
-    description: >-
-      Path of a .env file to write, e.g. build/.env. The document is rendered and escaped by Kagi
-      itself, not by this action, and the file is written with mode 0600. Leave unset to skip.
-    required: false
-  request-timeout-seconds:
-    description: 'Per-request timeout for the token mint and the secret fetch.'
-    required: false
-    default: '30'
-  mask:
-    description: >-
-      DEPRECATED and ignored. Every fetched value is always masked; Kagi has no per-secret
-      sensitivity flag, so there is nothing that could safely be left unmasked. Setting it to false
-      logs a warning and changes nothing.
-    required: false
-    default: 'true'
-
-outputs:
-  secret-count:
-    description: 'Number of distinct secret keys fetched (never the values themselves).'
-  scope-count:
-    description: 'Number of (app, environment) scopes the binding granted.'
-  env-file:
-    description: 'Absolute path of the written .env file, or empty when env-file-path was unset.'
 
 runs:
   using: 'node24'
   main: 'src/main.js'
+  post: 'src/post.js'
+  # The default, stated: the post step revokes the job's GitHub tokens even when the job failed.
+  post-if: 'always()'

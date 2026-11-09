@@ -1,0 +1,9 @@
+{
+  "version": "0.32.0",
+  "assets": {
+    "kagi-cli_0.32.0_darwin_amd64.tar.gz": "6db7d0964a8b15ea424e897f0e5171134af98b2877ebaa90bcd3973387f45346",
+    "kagi-cli_0.32.0_darwin_arm64.tar.gz": "964afa9865bb7422f8f5b0a8882a09c1fee414bb93109afc0e205c6a8f485284",
+    "kagi-cli_0.32.0_linux_amd64.tar.gz": "4fa10eed04ef140d5babb03dedd913020840a0f736bbb9609dc1d938abdc987c",
+    "kagi-cli_0.32.0_linux_arm64.tar.gz": "846bca0854ffd95651ac05db4cf1a07f66f816da67d179ec58edcaf39c14b305"
+  }
+}

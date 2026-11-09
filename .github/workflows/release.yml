@@ -3,32 +3,75 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      # Release tags only. The major tag (v2) does not match, so creating it starts no release.
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
+# Every job reads only. The release job, the one job that writes, raises its own permissions.
 permissions:
-  contents: write
+  contents: read
+
+# Never cancel a release halfway, between creating the major tag and creating the GitHub release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # Gate: customers pin @v1, which is a MOVING tag. Moving it onto a broken commit breaks every
-  # pipeline that uses this action at once, so the tests run before anything is published.
+  # Gate: a release tag is what customers pin, so the tests run before anything is published.
   test:
     name: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
       - run: npm test
 
-  release:
-    name: publish and move the major tag
-    needs: test
+  # Gate: the action runs `kagi pull --github-env` and, in its post step, `kagi ci revoke`. A CLI
+  # release from before CI mode has neither, so a tag whose src/cli-release.json pins one would
+  # ship an action that fails in every job. This installs the pinned CLI through the action itself
+  # and runs both commands; `kagi ci revoke` exits 0 when there is nothing to revoke.
+  cli-ci-mode:
+    name: the pinned Kagi CLI has CI mode
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned CLI
+        uses: ./
+        with:
+          pull: 'false'
+
+      - name: Check the CLI has the commands the action runs
+        run: |
+          set -euo pipefail
+          kagi --version
+          kagi ci revoke
+          help="$(kagi pull --help)"
+          grep -q -- '--github-env' <<<"$help"
+
+  release:
+    name: publish the release
+    needs: [test, cli-ci-mode]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only job that writes: it creates the major tag once and the GitHub release. Its token
+    # goes to `gh` through GH_TOKEN and is never stored in .git/config.
+    permissions:
+      contents: write
+    steps:
+      # Full history with every branch, so the check below can see whether the tag is on main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Parse the tag
         id: version
@@ -40,37 +83,97 @@ jobs:
             exit 1
           fi
           MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
           PRERELEASE="${BASH_REMATCH[4]:-}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "major=v$MAJOR" >> "$GITHUB_OUTPUT"
-          # A prerelease must never move the floating major tag: everyone pinned to @v1 would be
-          # upgraded to it silently.
           if [ -n "$PRERELEASE" ]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+          # Only vN.0.0 itself creates the major tag; a prerelease such as v3.0.0-rc.1 never does.
+          if [ "$MINOR" = "0" ] && [ "$PATCH" = "0" ] && [ -z "$PRERELEASE" ]; then
+            echo "first-of-major=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "first-of-major=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Anyone who can push can push a tag on any commit, including one on a branch nobody
+      # reviewed. Only code that reached main may become a release.
+      - name: Refuse a tag whose commit is not on main
+        id: commit
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse --is-shallow-repository)" != "false" ]; then
+            echo "::error::The checkout is shallow, so it cannot show whether $TAG is on main."
+            exit 1
+          fi
+          commit="$(git rev-parse --verify "refs/tags/${TAG}^{commit}")"
+          head="$(git rev-parse --verify 'HEAD^{commit}')"
+          if [ "$commit" != "$head" ]; then
+            echo "::error::$TAG points at $commit, but the tested checkout is $head."
+            exit 1
+          fi
+          if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+            echo "::error::The checkout has no origin/main to check $TAG against."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "::error::$TAG points at $commit, which is not reachable from main. Only a commit on main is released."
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "$TAG points at $commit, which is on main."
 
       - name: Verify the published tree is a usable action
         run: |
           set -euo pipefail
-          # The tag is what customers fetch; if the entry point named by action.yml is not in the
+          # The tag is what customers fetch; if an entry point named by action.yml is not in the
           # tree, every consumer fails at step start with an unhelpful runner error.
           test -f action.yml
-          test -f "$(python3 -c "import yaml,pathlib;print(yaml.safe_load(pathlib.Path('action.yml').read_text())['runs']['main'])")"
+          for key in main post; do
+            test -f "$(python3 -c "import sys,yaml,pathlib;print(yaml.safe_load(pathlib.Path('action.yml').read_text())['runs'][sys.argv[1]])" "$key")"
+          done
+          test -f src/cli-release.json
 
-      - name: Move the floating major tag
-        if: steps.version.outputs.prerelease == 'false'
+      # The major tag is created once, on the commit of vN.0.0, and never moves. If it followed
+      # each release, one tag pushed with a stolen or careless write credential would change the
+      # code that every `@vN` job runs, and those jobs hold an id-token and receive their secret
+      # set. A fix ships as a new vN.x.y tag, which a workflow adopts by changing its pin.
+      - name: Create the major tag on the first release of its major version
         env:
+          GH_TOKEN: ${{ github.token }}
           MAJOR: ${{ steps.version.outputs.major }}
-          TAG: ${{ steps.version.outputs.tag }}
+          FIRST_OF_MAJOR: ${{ steps.version.outputs.first-of-major }}
+          COMMIT: ${{ steps.commit.outputs.commit }}
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          # Annotated, and force-moved: v1 is documented as tracking the latest v1.x.y.
-          git tag -f -a "$MAJOR" -m "$MAJOR tracks the latest $MAJOR release (currently $TAG)"
-          git push --force origin "refs/tags/$MAJOR"
+          existing="$(git rev-parse --verify --quiet "refs/tags/${MAJOR}^{commit}" || true)"
+          if [ "$FIRST_OF_MAJOR" != "true" ]; then
+            if [ -n "$existing" ]; then
+              echo "$MAJOR stays on $existing; this release does not move it."
+            else
+              echo "::warning::$MAJOR does not exist. Only the release of ${MAJOR}.0.0 creates it."
+            fi
+            exit 0
+          fi
+          if [ -n "$existing" ]; then
+            if [ "$existing" = "$COMMIT" ]; then
+              echo "$MAJOR already points at $COMMIT."
+              exit 0
+            fi
+            echo "::error::$MAJOR already points at $existing, not at $COMMIT. The major tag is never moved."
+            exit 1
+          fi
+          # Creating a ref through the API fails when the ref already exists, so this step can
+          # never move a major tag that someone created in the meantime.
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f "ref=refs/tags/${MAJOR}" -f "sha=${COMMIT}" >/dev/null
+          echo "Created $MAJOR on $COMMIT."
 
       - name: Create the GitHub release
         env:
@@ -79,7 +182,8 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           set -euo pipefail
-          FLAGS=(--generate-notes --title "$TAG")
+          # --verify-tag: publish the tag checked above, and never let gh create a tag itself.
+          FLAGS=(--repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG")
           if [ "$PRERELEASE" = "true" ]; then
             FLAGS+=(--prerelease)
           fi

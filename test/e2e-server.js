@@ -1,85 +1,133 @@
 /**
  * A stand-in for the GitHub OIDC token service and the Kagi API, used by the CI smoke test.
  *
- * The smoke test runs the real action end to end on a real runner -- real INPUT_* wiring, real
- * $GITHUB_ENV, real node24 runtime -- which is the part unit tests cannot cover. It deliberately
- * does NOT declare `permissions: id-token: write`, so the only ACTIONS_ID_TOKEN_REQUEST_* variables
- * in play are the ones the workflow points at this server.
+ * The smoke test runs the real action on a real runner: the real CLI download and checksum check,
+ * the real Kagi CLI in CI mode, the real $GITHUB_ENV and the post step. The job deliberately does
+ * NOT declare `permissions: id-token: write`, so the only ACTIONS_ID_TOKEN_REQUEST_* variables in
+ * play are the ones the workflow points at this server.
  *
- * Serves:
- *   GET  /token?api-version=2.0&audience=...  -> { value: "<fake jwt>" }
- *   POST /kagi/auth/ci/fetch                  -> CustomResponse<KagiCiSecretFetchResponse>
+ * Serves the routes the Kagi CLI calls in CI mode:
+ *   GET  /token?api-version=2.0&audience=...  -> { value: "<unsigned JWT>" }
+ *   POST /kagi/auth/ci/exchange               -> KagiCiTokenExchangeResponse, or a 401 Problem
+ *   GET  /kagi/ci/secrets                     -> KagiCiSecretsResponse, once per Kagi token
  */
 
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 
-const EXPECTED_AUDIENCE = process.env.E2E_EXPECTED_AUDIENCE ?? 'api.kagi.pw';
+// The CLI asks for an id-token whose audience is the host of the Kagi API it talks to, and this
+// server is that API, so a job that sets no audience must ask for 127.0.0.1.
+const EXPECTED_AUDIENCE = process.env.E2E_EXPECTED_AUDIENCE ?? '127.0.0.1';
+const RUNNER_BEARER = 'e2e-runner-bearer';
 const SECRET_VALUE = 'e2e-secret-value';
+const BINDING_NAME = 'e2e-binding';
+/** The binding id the smoke test sends to get the opaque 401 of a refused job. */
 const DENIED_BINDING_ID = '00000000-0000-4000-8000-000000000000';
 
-const server = createServer((request, response) => {
-  const url = new URL(request.url, 'http://localhost');
+function base64url(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
 
-  if (request.method === 'GET' && url.pathname === '/token') {
-    if (request.headers.authorization !== 'Bearer e2e-runner-bearer') {
-      return json(response, 401, { message: 'wrong runner bearer' });
-    }
-    if (url.searchParams.get('audience') !== EXPECTED_AUDIENCE) {
-      return json(response, 400, { message: `wrong audience: ${url.searchParams.get('audience')}` });
-    }
-    return json(response, 200, { value: 'header.payload.signature' });
-  }
+/** Unsigned, but shaped like GitHub's, so the CLI can print the job's claims on a refusal. */
+const ID_TOKEN = [
+  base64url({ alg: 'none', typ: 'JWT' }),
+  base64url({
+    aud: EXPECTED_AUDIENCE,
+    repository: 'korurlabs/kagi-action',
+    workflow_ref: 'korurlabs/kagi-action/.github/workflows/ci.yml@refs/heads/main',
+    ref: 'refs/heads/main',
+    event_name: 'push',
+  }),
+  'e2e-signature',
+].join('.');
 
-  if (request.method === 'POST' && url.pathname === '/kagi/auth/ci/fetch') {
+/** Kagi tokens issued by the exchange and not yet spent by a read. */
+const unspentTokens = new Set();
+
+function json(response, status, payload, contentType = 'application/json') {
+  response.writeHead(status, { 'content-type': contentType });
+  response.end(JSON.stringify(payload));
+}
+
+function refuse(response, detail) {
+  json(
+    response,
+    401,
+    { type: 'about:blank', title: 'Unauthorized', status: 401, detail, code: 'KGI_AUT_002' },
+    'application/problem+json'
+  );
+}
+
+function readJson(request) {
+  return new Promise((resolve, reject) => {
     let raw = '';
     request.on('data', (chunk) => {
       raw += chunk;
     });
     request.on('end', () => {
-      const body = JSON.parse(raw);
-      // Reserved routing id the smoke test uses to exercise the opaque-denial path.
-      if (body.bindingId === DENIED_BINDING_ID) {
-        return json(response, 401, { success: false, error: { code: 'KGI_AUT_CI_EXCHANGE_DENIED' } });
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
       }
-      if (body.provider !== 'GITHUB_ACTIONS' || body.token !== 'header.payload.signature') {
-        return json(response, 401, { success: false, error: { code: 'KGI_AUT_CI_EXCHANGE_DENIED' } });
-      }
-      const secrets = { E2E_SECRET: SECRET_VALUE, E2E_MULTILINE: 'first-line\nsecond-line' };
-      const dotenv =
-        `E2E_SECRET="${SECRET_VALUE}"\n` + 'E2E_MULTILINE="first-line\\nsecond-line"\n';
-      return json(response, 200, {
-        success: true,
-        message: 'Secrets fetched successfully',
-        data: {
-          scopes: [
-            {
-              appId: '11111111-1111-1111-1111-111111111111',
-              appPath: '/e2e/app',
-              environmentSlug: 'production',
-              secrets,
-            },
-          ],
-          dotenv: body.format === 'DOTENV' ? dotenv : null,
-        },
-        pagination: null,
-        error: null,
-      });
     });
-    request.on('error', (error) => {
-      json(response, 500, { message: error.message });
+    request.on('error', reject);
+  });
+}
+
+const server = createServer(async (request, response) => {
+  const url = new URL(request.url, 'http://localhost');
+
+  if (request.method === 'GET' && url.pathname === '/token') {
+    if (request.headers.authorization !== `Bearer ${RUNNER_BEARER}`) {
+      return json(response, 401, { message: 'wrong runner bearer' });
+    }
+    if (url.searchParams.get('audience') !== EXPECTED_AUDIENCE) {
+      return json(response, 400, { message: `wrong audience: ${url.searchParams.get('audience')}` });
+    }
+    return json(response, 200, { value: ID_TOKEN });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/kagi/auth/ci/exchange') {
+    let body;
+    try {
+      body = await readJson(request);
+    } catch (error) {
+      return json(response, 400, { message: `not JSON: ${error.message}` });
+    }
+    if (body.bindingId === DENIED_BINDING_ID) {
+      return refuse(response, 'No Kagi CI binding accepts this job.');
+    }
+    if (body.provider !== 'GITHUB_ACTIONS' || body.token !== ID_TOKEN) {
+      return refuse(response, 'The id-token was not accepted.');
+    }
+    const accessToken = `e2e-kagi-token-${randomUUID()}`;
+    unspentTokens.add(accessToken);
+    return json(response, 200, {
+      accessToken,
+      bindingName: BINDING_NAME,
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
     });
-    return undefined;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/kagi/ci/secrets') {
+    const token = (request.headers.authorization ?? '').replace(/^Bearer /, '');
+    // Spent by its first read, as the real token is.
+    if (!unspentTokens.delete(token)) {
+      return refuse(response, 'The Kagi token is unknown or already used.');
+    }
+    return json(response, 200, {
+      bindingName: BINDING_NAME,
+      dotenv: null,
+      githubTokens: [],
+      recentlyRemoved: ['E2E_REMOVED'],
+      secrets: { E2E_SECRET: SECRET_VALUE, E2E_MULTILINE: 'first-line\nsecond-line' },
+    });
   }
 
   return json(response, 404, { message: 'no route' });
 });
-
-function json(response, status, payload) {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, { 'content-type': 'application/json' });
-  response.end(body);
-}
 
 server.listen(0, '127.0.0.1', () => {
   const { port } = server.address();
