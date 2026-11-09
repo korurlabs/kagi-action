@@ -16,7 +16,9 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 
-const EXPECTED_AUDIENCE = process.env.E2E_EXPECTED_AUDIENCE ?? 'api.kagi.pw';
+// The CLI asks for an id-token whose audience is the host of the Kagi API it talks to, and this
+// server is that API, so a job that sets no audience must ask for 127.0.0.1.
+const EXPECTED_AUDIENCE = process.env.E2E_EXPECTED_AUDIENCE ?? '127.0.0.1';
 const RUNNER_BEARER = 'e2e-runner-bearer';
 const SECRET_VALUE = 'e2e-secret-value';
 const BINDING_NAME = 'e2e-binding';
