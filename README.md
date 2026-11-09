@@ -1,9 +1,10 @@
 # Kagi Secrets GitHub Action
 
-Load the [Kagi](https://kagi.pw) secret set your organization granted a workflow, using the job's
-own identity. There is no token to store, rotate or leak: GitHub mints a short-lived OIDC id-token
-for the job, Kagi matches it against the CI binding an org admin configured, and the job receives
-exactly the secret set that binding grants.
+Load the [Kagi](https://kagi.pw) secrets your organization gives a workflow, using the job's own
+identity. There is no token to store, rotate or leak: GitHub mints a short-lived OIDC id-token for
+the job, Kagi matches it against the CI binding an org admin configured, and the job receives
+exactly the items that binding gives: whole environments, single secrets, and GitHub tokens Kagi
+mints for the job.
 
 ## Quick start
 
@@ -20,7 +21,7 @@ jobs:
 
       - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
 
-      - run: ./deploy.sh   # the secret set is now in this step's environment
+      - run: ./deploy.sh   # the binding's secrets are now in this step's environment
 ```
 
 The step needs no inputs. Kagi finds the binding from the job's own claims (repository, workflow,
@@ -38,13 +39,14 @@ handles your secrets, and a commit SHA names exactly one tree of code. See [Vers
 3. It extracts only the `kagi` binary into `$RUNNER_TEMP` and puts it on `PATH` for the later
    steps of the job.
 4. It runs `kagi pull --github-env`. The CLI requests the job's id-token, exchanges it at Kagi for a
-   single-use Kagi token, reads the secret set once, masks every value and appends each variable to
-   `$GITHUB_ENV`. The Kagi token stays in the CLI's memory and is never written anywhere.
+   single-use Kagi token, reads the binding's items once, masks every value and appends each
+   variable to `$GITHUB_ENV`. The Kagi token stays in the CLI's memory and is never written
+   anywhere.
 5. At the end of the job, the post step runs `kagi ci revoke`, which revokes the GitHub tokens Kagi
-   minted for this job (if the set contains GitHub token items). It runs whether the job succeeded
-   or failed, and does nothing when there is nothing to revoke.
+   minted for this job (if the binding gives GitHub tokens). It runs whether the job succeeded or
+   failed, and does nothing when there is nothing to revoke.
 
-Every later step of the job gets the secret set in its environment. Steps in other jobs do not.
+Every later step of the job gets these secrets in its environment. Steps in other jobs do not.
 
 The CLI's output is passed through unchanged, and only its exit code decides whether the step
 fails. When Kagi refuses the job, the CLI prints the job's claims next to the reason, so an org
@@ -52,9 +54,9 @@ admin can see which binding is missing.
 
 ## Limiting the secrets to one command
 
-`kagi pull --github-env` hands the set to every later step of the job, including third-party
-actions. To give it to one command only, install the CLI without pulling and wrap that command in
-`kagi run`:
+`kagi pull --github-env` hands the secrets to every later step of the job, including third-party
+actions. To give them to one command only, install the CLI without pulling and wrap that command
+in `kagi run`:
 
 ```yaml
       - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
@@ -64,16 +66,16 @@ actions. To give it to one command only, install the CLI without pulling and wra
       - run: kagi run -- ./deploy.sh   # only ./deploy.sh sees the secrets
 ```
 
-`kagi run` fetches the set when its step starts, hands it to the command's environment only, and
-revokes any GitHub token it minted when the command ends. It reads the same environment variables
-as the action: if you set `api-url`, `binding-id` or `audience`, also set `KAGI_API_URL`,
+`kagi run` fetches the secrets when its step starts, hands them to the command's environment only,
+and revokes any GitHub token it minted when the command ends. It reads the same environment
+variables as the action: if you set `api-url`, `binding-id` or `audience`, also set `KAGI_API_URL`,
 `KAGI_BINDING_ID` or `KAGI_AUDIENCE` in the environment of the step that runs `kagi run`.
 
 Because each fetch happens when its step starts, `kagi run` also suits a GitHub token that is needed
 late in a long job: GitHub fixes an installation token's lifetime at one hour from minting.
 
-To write the set to a file instead, set `pull: 'false'` and run `kagi pull --out-file <path>`, which
-writes `KEY=VALUE` lines to that file with mode `0600`.
+To write the secrets to a file instead, set `pull: 'false'` and run `kagi pull --out-file <path>`,
+which writes `KEY=VALUE` lines to that file with mode `0600`.
 
 ## Inputs
 
@@ -102,9 +104,9 @@ both output streams of an action's process (actions/runner,
 `src/Runner.Worker/Handlers/NodeScriptActionHandler.cs`).
 
 Masking is log hygiene, not a security boundary. Any step of a job with `id-token: write` can
-request the job's id-token and fetch its set, and any step after the pull can read the variables.
-Run secret-using work in a dedicated job, pin every action to a commit SHA, and prefer `kagi run`
-over `--github-env` where you can.
+request the job's id-token and fetch its secrets, and any step after the pull can read the
+variables. Run secret-using work in a dedicated job, pin every action to a commit SHA, and prefer
+`kagi run` over `--github-env` where you can.
 
 ## Requirements
 
@@ -117,14 +119,14 @@ over `--github-env` where you can.
 ## Upgrading from v1
 
 v1 stops working against the current Kagi API: it called `POST /kagi/auth/ci/fetch`, which Kagi
-replaced with a token exchange and a single-use read of the job's secret set. Move to v2:
+replaced with a token exchange and a single-use read of what the job's binding gives. Move to v2:
 
 - Remove `binding-id` unless the binding pins a custom audience.
 - Remove `export-env`, `env-file-path`, `request-timeout-seconds` and `mask`; v2 does not have them.
   For a file, use `kagi pull --out-file` as shown above.
 - Remove any use of the outputs `secret-count`, `scope-count` and `env-file`; v2 has no outputs.
-- In Kagi, give the workflow's binding a secret set. A binding grants one set, not a list of
-  (app, environment) scopes.
+- In Kagi, give the workflow's CI binding the environments it needs (app and environment),
+  optionally single secrets or a GitHub token.
 
 ## The pinned CLI
 

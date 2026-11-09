@@ -2,8 +2,8 @@
  * Runs the installed Kagi CLI.
  *
  * The CLI does all of the CI work itself: it requests the job's OIDC id-token, exchanges it,
- * reads the secret set once, masks every value and writes $GITHUB_ENV. This module only starts it
- * with the right arguments and environment and reports how it ended.
+ * reads what the job's binding gives once, masks every value and writes $GITHUB_ENV. This module
+ * only starts it with the right arguments and environment and reports how it ended.
  *
  * The CLI's stdout and stderr are inherited, never piped, buffered or silenced. The CLI writes its
  * ::add-mask:: and ::warning:: workflow commands to stderr, and the runner reads workflow commands
@@ -19,7 +19,7 @@
 import { spawn } from 'node:child_process';
 import { ActionError } from './core.js';
 
-/** Writes the set into $GITHUB_ENV for the later steps of the job. */
+/** Writes the binding's secrets into $GITHUB_ENV for the later steps of the job. */
 export const PULL_ARGS = Object.freeze(['pull', '--github-env']);
 
 /** Revokes the GitHub tokens that any `kagi pull` of this job minted and kept under $RUNNER_TEMP. */

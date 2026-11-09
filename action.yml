@@ -1,7 +1,7 @@
 name: 'Kagi Secrets'
 description: >-
-  Load the secret set Kagi grants this workflow, with the job's own OIDC id-token. No stored
-  credential: installs the checksum-verified Kagi CLI and runs its CI mode.
+  Load the secrets this workflow's Kagi CI binding gives, with the job's own OIDC id-token. No
+  stored credential: installs the checksum-verified Kagi CLI and runs its CI mode.
 author: 'Korur'
 
 branding:
@@ -36,9 +36,10 @@ inputs:
     default: ''
   pull:
     description: >-
-      Run `kagi pull --github-env`, which puts the secret set into the environment of every later
-      step of this job. Set it to false to only install the CLI, and run `kagi run -- <command>` in
-      the step that needs the secrets, which hands them to that one command.
+      Run `kagi pull --github-env`, which puts the binding's secrets into the environment of every
+      later step of this job. Set it to false to only install the CLI, and run
+      `kagi run -- <command>` in the step that needs the secrets, which hands them to that one
+      command.
     required: false
     default: 'true'
 

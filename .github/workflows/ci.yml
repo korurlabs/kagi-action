@@ -81,8 +81,8 @@ jobs:
         with:
           pull: 'false'
 
-      # kagi run fetches the set itself and hands it to its command only.
-      - name: kagi run hands the set to one command
+      # kagi run fetches the binding's secrets itself and hands them to its command only.
+      - name: kagi run hands the secrets to one command
         env:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
@@ -101,7 +101,7 @@ jobs:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
 
-      - name: The secret set is in the environment of later steps
+      - name: The binding's secrets are in the environment of later steps
         run: |
           set -euo pipefail
           test "$E2E_SECRET" = "$E2E_SECRET_VALUE"

@@ -2,7 +2,7 @@
   "name": "kagi-action",
   "version": "2.0.0",
   "private": true,
-  "description": "GitHub Action that installs the checksum-verified Kagi CLI and loads the job's Kagi secret set with its own OIDC id-token",
+  "description": "GitHub Action that installs the checksum-verified Kagi CLI and loads what the job's Kagi CI binding gives with its own OIDC id-token",
   "type": "module",
   "engines": {
     "node": ">=22"

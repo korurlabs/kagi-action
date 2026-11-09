@@ -9,7 +9,7 @@
  * Serves the routes the Kagi CLI calls in CI mode:
  *   GET  /token?api-version=2.0&audience=...  -> { value: "<unsigned JWT>" }
  *   POST /kagi/auth/ci/exchange               -> KagiCiTokenExchangeResponse, or a 401 Problem
- *   GET  /kagi/ci/secret-set                  -> KagiCiSecretSetResponse, once per Kagi token
+ *   GET  /kagi/ci/secrets                     -> KagiCiSecretsResponse, once per Kagi token
  */
 
 import { createServer } from 'node:http';
@@ -19,7 +19,7 @@ import { writeFileSync } from 'node:fs';
 const EXPECTED_AUDIENCE = process.env.E2E_EXPECTED_AUDIENCE ?? 'api.kagi.pw';
 const RUNNER_BEARER = 'e2e-runner-bearer';
 const SECRET_VALUE = 'e2e-secret-value';
-const SET_NAME = 'e2e-set';
+const BINDING_NAME = 'e2e-binding';
 /** The binding id the smoke test sends to get the opaque 401 of a refused job. */
 const DENIED_BINDING_ID = '00000000-0000-4000-8000-000000000000';
 
@@ -104,23 +104,23 @@ const server = createServer(async (request, response) => {
     unspentTokens.add(accessToken);
     return json(response, 200, {
       accessToken,
+      bindingName: BINDING_NAME,
       expiresAt: new Date(Date.now() + 120_000).toISOString(),
-      secretSetName: SET_NAME,
     });
   }
 
-  if (request.method === 'GET' && url.pathname === '/kagi/ci/secret-set') {
+  if (request.method === 'GET' && url.pathname === '/kagi/ci/secrets') {
     const token = (request.headers.authorization ?? '').replace(/^Bearer /, '');
     // Spent by its first read, as the real token is.
     if (!unspentTokens.delete(token)) {
       return refuse(response, 'The Kagi token is unknown or already used.');
     }
     return json(response, 200, {
-      secretSetName: SET_NAME,
-      secrets: { E2E_SECRET: SECRET_VALUE, E2E_MULTILINE: 'first-line\nsecond-line' },
+      bindingName: BINDING_NAME,
+      dotenv: null,
       githubTokens: [],
       recentlyRemoved: ['E2E_REMOVED'],
-      dotenv: null,
+      secrets: { E2E_SECRET: SECRET_VALUE, E2E_MULTILINE: 'first-line\nsecond-line' },
     });
   }
 

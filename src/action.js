@@ -3,7 +3,7 @@
  *
  * main: install the pinned, checksum-verified Kagi CLI, put it on PATH, and run
  * `kagi pull --github-env`, which proves the job's identity with its OIDC id-token and writes the
- * secret set Kagi grants this workflow into $GITHUB_ENV.
+ * secrets this workflow's Kagi CI binding gives into $GITHUB_ENV.
  *
  * post: run `kagi ci revoke`, which revokes the GitHub tokens Kagi minted for the job. The runner
  * runs it at the end of the job whether the main step succeeded or not.
@@ -100,7 +100,7 @@ export async function main({
   if (!inputs.pull) {
     info(
       'pull is false, so no secrets were read. Run `kagi run -- <command>` in the step that needs ' +
-        'them, which hands the secret set to that one command.'
+        'them, which hands the secrets to that one command.'
     );
     return;
   }
