@@ -6,8 +6,20 @@
 version: 2
 
 updates:
-  # Actions are pinned to a commit SHA with the version in a comment; Dependabot
-  # updates both together.
+  # GitHub Actions are dependencies of the pipelines, like libraries.
+  #
+  # 1. A workflow step such as this one in .github/workflows/ci.yml does not
+  #    run our code; it downloads and runs code from another repository:
+  #      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  # 2. That repository (github.com/actions/checkout) holds a small program, a
+  #    TypeScript app started from its action.yml, that clones our code onto
+  #    the build machine. setup-node works the same way.
+  # 3. Its releases are git tags (v7.0.1, v7.0.2, ...). We pin the commit SHA
+  #    the tag points to, so a tag that is moved later cannot change what runs
+  #    with our secrets; the version stays readable in the comment.
+  # 4. When a new version is released, Dependabot opens a pull request that
+  #    changes the SHA and the comment together, so the pin never goes stale
+  #    and every bump is reviewed and tested before it runs.
   - package-ecosystem: github-actions
     directory: /
     schedule:
