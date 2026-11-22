@@ -1,0 +1,70 @@
+name: CodeQL
+
+# Static analysis of the source code for security flaws (injection, unsafe
+# deserialization, path traversal, leaked tokens in workflows and so on). The
+# results appear under the repository's Security tab, and a pull request shows
+# the new alerts it introduces. CodeQL is free on a public repository.
+#
+# It runs on every pull request and push to main, so a flaw is found before it
+# merges, and weekly, so code that did not change is checked against the new
+# queries GitHub adds.
+#
+# Languages: javascript-typescript (the action in src/ and its tests) and
+# actions (action.yml and the workflows). Both are analysed from source
+# without a build.
+#
+# Fork safety: `pull_request` only (never `pull_request_target`), so a run from
+# a fork gets a read-only token and no secret.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Uploads the results to the Security tab.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended adds lower-precision security queries to the
+          # default set; code-quality queries stay out to keep alerts security-only.
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: /language:${{ matrix.language }}
