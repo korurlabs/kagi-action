@@ -1,0 +1,55 @@
+name: Dependency review
+
+# Blocks a pull request that adds a dependency, or upgrades one to a version,
+# with a known vulnerability of any severity. GitHub compares the dependency
+# manifests and lock files of the pull request with those on main, looks each
+# new or changed version up in the GitHub Advisory Database and fails this
+# check when one has an advisory. On a failure it posts a summary comment that
+# names the package, the advisory and the patched version where one exists.
+#
+# It checks only what the pull request changes. Vulnerabilities in dependencies
+# already on main, and advisories published after a dependency merged, are
+# reported by Dependabot alerts under the repository's Security tab.
+#
+# Ecosystems: the GitHub Actions that action.yml and the workflows use, and
+# npm. The action has no npm dependency today (package.json lists none), so an
+# npm finding means the pull request adds the first one.
+#
+# The job id and name are both `dependency-review`, because the main branch
+# ruleset requires the check by that name. Renaming either one leaves the
+# ruleset waiting for a check that never reports.
+#
+# Fork safety: `pull_request` only (never `pull_request_target`), so a run from
+# a fork gets a read-only token and no secret, and it cannot post the comment.
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: dependency-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Posts the summary comment on the pull request when the check fails.
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: low
+          comment-summary-in-pr: on-failure

@@ -1,0 +1,104 @@
+name: Trivy
+
+# Scans the repository's files with Trivy for three kinds of problem: known
+# vulnerabilities in the npm dependencies package.json names (none today),
+# secrets committed by mistake, and insecure configuration in any file Trivy
+# reads as infrastructure code. The action itself is JavaScript run by the
+# runner, so its source is analysed by CodeQL; this scan covers what CodeQL does
+# not. The results appear under the repository's Security tab as the tool
+# "Trivy", and a pull request shows the new alerts it introduces.
+#
+# This job reports and never fails on a finding. The main branch ruleset gates
+# the results through code scanning, which counts only the alerts a pull request
+# adds, so a vulnerability already on main does not block unrelated work.
+# Vulnerabilities with no fixed version are left out, because nothing in a pull
+# request can resolve them.
+#
+# It runs on every pull request and push to main, and weekly, so code that did
+# not change is checked against advisories published since.
+#
+# Supply chain: aquasecurity/trivy-action had 76 of its version tags hijacked on
+# 2026-03-19 (GHSA-69fq-xp46-6x23). The action is pinned to the commit of 0.35.0,
+# which Aqua states was not affected, and the Trivy binary to a fixed version
+# published after the incident under immutable releases. Never move either to a
+# branch, a bare tag or `latest`.
+#
+# Fork safety: `pull_request` only (never `pull_request_target`), so a run from
+# a fork gets a read-only token and no secret.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  trivy:
+    name: trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Uploads the results to the Security tab.
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The vulnerability database is rebuilt every few hours; one cache entry a
+      # day keeps the download off most runs, and Trivy still refreshes a copy
+      # that is out of date. The cache lives outside the checkout so the scan
+      # does not read it. Every run restores the copy; only main saves one, so
+      # pull requests do not each store their own copy of a database of about
+      # 140 MB against the repository's cache budget. Every branch can read
+      # what main saves.
+      - name: Date for the Trivy cache key
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Trivy database
+        id: trivy-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/trivy-cache
+          key: trivy-db-${{ runner.os }}-${{ steps.date.outputs.date }}
+          restore-keys: trivy-db-${{ runner.os }}-
+
+      - name: Scan the repository
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          version: v0.76.2
+          # The database is cached by the step above.
+          cache: 'false'
+          cache-dir: ${{ runner.temp }}/trivy-cache
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          ignore-unfixed: true
+          format: sarif
+          output: ${{ runner.temp }}/trivy-results.sarif
+
+      - name: Save the Trivy database
+        if: github.ref == 'refs/heads/main' && steps.trivy-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/trivy-cache
+          key: ${{ steps.trivy-cache.outputs.cache-primary-key }}
+
+      - name: Upload the results
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: ${{ runner.temp }}/trivy-results.sarif
+          category: trivy
