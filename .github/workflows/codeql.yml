@@ -60,9 +60,10 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # security-extended adds lower-precision security queries to the
-          # default set; code-quality queries stay out to keep alerts security-only.
-          queries: security-extended
+          # security-and-quality runs every security-extended query plus the
+          # maintainability and reliability queries, so a pull request is
+          # checked for code-quality defects as well as for vulnerabilities.
+          queries: security-and-quality
 
       - name: Analyze
         uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
