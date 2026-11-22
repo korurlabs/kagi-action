@@ -1,0 +1,23 @@
+# Version updates for the workflows. The action itself has no dependencies, so
+# GitHub Actions is the only ecosystem to watch. Minor and patch bumps share one
+# pull request; a major bump gets its own because it may break. The cooldown
+# holds a release back for a week, so a hijacked version is usually yanked
+# before it reaches a pull request.
+version: 2
+
+updates:
+  # Actions are pinned to a commit SHA with the version in a comment; Dependabot
+  # updates both together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Istanbul
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
