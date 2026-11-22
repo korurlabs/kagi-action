@@ -171,13 +171,23 @@ export function writeFakeKagi(script = FAKE_KAGI_SCRIPT) {
 
 /**
  * Serves `routes` (path to { status, body }) on 127.0.0.1 and records every request path.
- * A route may also be a function of the request count for that path.
+ * A route may also be a function of the request count for that path. Any other path answers 404.
+ *
+ * The routes are copied into a Map of the caller's own entries, so a request path can never reach
+ * an inherited property such as `constructor` or `__proto__` and get called as a handler.
  */
 export async function startServer(routes) {
+  const table = new Map();
+  for (const [path, route] of Object.entries(routes)) {
+    if (typeof route !== 'function' && (route === null || typeof route !== 'object')) {
+      throw new TypeError(`startServer: route ${path} must be { status, body } or a function, got ${typeof route}`);
+    }
+    table.set(path, route);
+  }
   const requests = [];
   const server = createServer((request, response) => {
     requests.push(request.url);
-    const route = routes[request.url];
+    const route = table.get(request.url);
     const answer = typeof route === 'function' ? route(requests.filter((u) => u === request.url).length) : route;
     if (!answer) {
       response.writeHead(404).end('not found');
