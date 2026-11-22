@@ -1,0 +1,35 @@
+# Version updates for the workflows. The action itself has no dependencies, so
+# GitHub Actions is the only ecosystem to watch. Minor and patch bumps share one
+# pull request; a major bump gets its own because it may break. The cooldown
+# holds a release back for a week, so a hijacked version is usually yanked
+# before it reaches a pull request.
+version: 2
+
+updates:
+  # GitHub Actions are dependencies of the pipelines, like libraries.
+  #
+  # 1. A workflow step such as this one in .github/workflows/ci.yml does not
+  #    run our code; it downloads and runs code from another repository:
+  #      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  # 2. That repository (github.com/actions/checkout) holds a small program, a
+  #    TypeScript app started from its action.yml, that clones our code onto
+  #    the build machine. setup-node works the same way.
+  # 3. Its releases are git tags (v7.0.1, v7.0.2, ...). We pin the commit SHA
+  #    the tag points to, so a tag that is moved later cannot change what runs
+  #    with our secrets; the version stays readable in the comment.
+  # 4. When a new version is released, Dependabot opens a pull request that
+  #    changes the SHA and the comment together, so the pin never goes stale
+  #    and every bump is reviewed and tested before it runs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Istanbul
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
