@@ -16,6 +16,8 @@ import { fakeCliArchive, releaseFor, sha256, startServer } from './helpers.js';
 const HARNESS = new URL('./fixtures/run-action.js', import.meta.url).pathname;
 const OS = { linux: 'linux', darwin: 'darwin' }[process.platform];
 const ARCH = { x64: 'amd64', arm64: 'arm64' }[process.arch];
+const APP_ID = '6d8f6d80-4e21-469d-907d-b13773f4e284';
+const ROLE = { 'app-id': APP_ID, environment: 'production' };
 
 let server;
 let fixture;
@@ -78,10 +80,10 @@ describe('the CLI output reaches the runner untouched', { skip: !OS || !ARCH }, 
   test('main: the fake kagi stdout and its stderr ::add-mask:: line come out of the action', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'kagi-action-fwd-'));
     const marker = join(dir, 'shell-ran');
-    const result = await runStep('main', runnerEnv(dir, { audience: `$(touch ${marker})` }));
+    const result = await runStep('main', runnerEnv(dir, { ...ROLE, audience: `$(touch ${marker})` }));
 
     assert.equal(result.code, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /^fake-kagi args: pull --github-env$/m);
+    assert.match(result.stdout, new RegExp(`^fake-kagi args: pull --github-env --identity github --app-id ${APP_ID} --env production$`, 'm'));
     assert.match(result.stdout, /^fake-kagi KAGI_API_URL=https:\/\/api\.kagi\.pw$/m);
     assert.match(result.stdout, /^fake-kagi KAGI_BINDING_ID=<unset>$/m);
     assert.match(result.stderr, /^::add-mask::fake-secret-value$/m, 'the CLI stderr must reach the runner');
@@ -99,7 +101,7 @@ describe('the CLI output reaches the runner untouched', { skip: !OS || !ARCH }, 
 
   test('main: a failing pull fails the step after the CLI had its say', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'kagi-action-fwd-'));
-    const result = await runStep('main', { ...runnerEnv(dir), FAKE_KAGI_EXIT: '3' });
+    const result = await runStep('main', { ...runnerEnv(dir, ROLE), FAKE_KAGI_EXIT: '3' });
     assert.equal(result.code, 1);
     assert.match(result.stderr, /^::add-mask::fake-secret-value$/m);
     assert.match(result.stdout, /^::error::kagi pull --github-env exited with code 3\. Its own output above says why\.$/m);

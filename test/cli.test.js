@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { CLI_STDIO, PULL_ARGS, REVOKE_ARGS, buildCliEnv, describeFailure, runCli } from '../src/cli.js';
+import { CLI_STDIO, PULL_ARGS, REVOKE_ARGS, buildCliEnv, describeFailure, pullArgs, runCli } from '../src/cli.js';
 import { ActionError } from '../src/core.js';
 import { stubSpawn, writeFakeKagi } from './helpers.js';
 
@@ -8,6 +8,20 @@ describe('arguments', () => {
   test('the main step runs kagi pull --github-env and the post step kagi ci revoke', () => {
     assert.deepEqual([...PULL_ARGS], ['pull', '--github-env']);
     assert.deepEqual([...REVOKE_ARGS], ['ci', 'revoke']);
+  });
+
+  test('a workload role pull forces the GitHub identity and names the app environment', () => {
+    const appId = '6d8f6d80-4e21-469d-907d-b13773f4e284';
+    assert.deepEqual(pullArgs({ bindingId: '', appId, environment: 'production' }), [
+      'pull', '--github-env', '--identity', 'github', '--app-id', appId, '--env', 'production',
+    ]);
+  });
+
+  test('a legacy binding pull passes no selection flag, which the CLI would refuse', () => {
+    const args = pullArgs({ bindingId: '3fa2c1e0-0000-4000-8000-000000000000', appId: '', environment: '' });
+    assert.deepEqual(args, ['pull', '--github-env']);
+    args.push('mutated');
+    assert.deepEqual([...PULL_ARGS], ['pull', '--github-env'], 'the shared arguments are never changed');
   });
 
   test('inputs reach the CLI as the variables CI mode reads, set only when given', () => {
@@ -30,9 +44,11 @@ describe('arguments', () => {
     assert.equal(env.KAGI_API_URL, 'https://api.kagi.pw');
   });
 
-  test('an empty binding-id keeps a KAGI_BINDING_ID the workflow set on the step', () => {
-    const env = buildCliEnv({ KAGI_BINDING_ID: 'from-workflow' }, { apiUrl: 'https://api.kagi.pw', bindingId: '' });
-    assert.equal(env.KAGI_BINDING_ID, 'from-workflow');
+  test('an empty binding-id removes a KAGI_BINDING_ID the workflow set, so it cannot turn a role pull into a binding pull', () => {
+    const base = { KAGI_BINDING_ID: 'from-workflow' };
+    const env = buildCliEnv(base, { apiUrl: 'https://api.kagi.pw', bindingId: '' });
+    assert.equal('KAGI_BINDING_ID' in env, false);
+    assert.equal(base.KAGI_BINDING_ID, 'from-workflow', 'the step environment itself is not changed');
   });
 });
 

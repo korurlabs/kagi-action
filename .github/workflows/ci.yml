@@ -41,8 +41,8 @@ jobs:
       - run: npm test
 
   # Runs the real action on a real runner: the real download of the pinned Kagi CLI and its
-  # checksum check, the real CLI in CI mode, the runner's own INPUT_* wiring, $GITHUB_ENV, $GITHUB_PATH
-  # and the post step. GitHub's token service and the Kagi API are replaced by test/e2e-server.js.
+  # checksum check, the real CLI with a workload role and with a legacy binding, the runner's own
+  # INPUT_* wiring, $GITHUB_ENV, $GITHUB_PATH and the post step. GitHub's token service and the Kagi API are replaced by test/e2e-server.js.
   # The job deliberately does NOT request id-token: write, so the only token-service variables in
   # play are the ones the steps below point at the stand-in.
   #
@@ -81,7 +81,8 @@ jobs:
         with:
           pull: 'false'
 
-      # kagi run fetches the binding's secrets itself and hands them to its command only.
+      # kagi run exchanges the id-token for the role's app environment and hands its secrets to its
+      # command only.
       - name: kagi run hands the secrets to one command
         env:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
@@ -90,13 +91,36 @@ jobs:
         run: |
           set -euo pipefail
           command -v kagi
-          kagi run -- sh -c 'test "$E2E_SECRET" = "$E2E_SECRET_VALUE"'
+          kagi run --identity github --app-id "$E2E_APP_ID" --env "$E2E_ENVIRONMENT" -- \
+            sh -c 'test "$E2E_SECRET" = "$E2E_SECRET_VALUE"'
           test -z "${E2E_SECRET:-}"
 
-      - name: Run the action
+      - name: Run the action with a workload role
         uses: ./
         with:
           api-url: ${{ env.E2E_API_URL }}
+          app-id: ${{ env.E2E_APP_ID }}
+          environment: ${{ env.E2E_ENVIRONMENT }}
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
+
+      - name: The role's secrets are in the environment of later steps
+        run: |
+          set -euo pipefail
+          test "$E2E_SECRET" = "$E2E_SECRET_VALUE"
+          test "$E2E_MULTILINE" = "$(printf 'first-line\nsecond-line')"
+          # The Kagi token stays in the CLI's memory and never reaches a later step.
+          if env | grep -q 'e2e-kagi-token-'; then
+            echo "::error::The Kagi token reached the environment of a later step."
+            exit 1
+          fi
+
+      - name: Run the action with a legacy CI binding
+        uses: ./
+        with:
+          api-url: ${{ env.E2E_API_URL }}
+          binding-id: ${{ env.E2E_BINDING_ID }}
         env:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
@@ -105,18 +129,29 @@ jobs:
         run: |
           set -euo pipefail
           test "$E2E_SECRET" = "$E2E_SECRET_VALUE"
-          test "$E2E_MULTILINE" = "$(printf 'first-line\nsecond-line')"
-          # The single-use Kagi token stays in the CLI's memory and never reaches a later step.
           if env | grep -q 'e2e-kagi-token-'; then
             echo "::error::The Kagi token reached the environment of a later step."
             exit 1
           fi
 
-      # The reserved binding id below makes the stand-in refuse the exchange with a 401, as Kagi
-      # does for a job no binding accepts. The step must fail; it must never let the job continue
-      # without its secrets.
-      - name: A refused job fails the step
+      # The reserved app id below is granted by no role of the stand-in, which refuses the exchange
+      # with a 401, as Kagi does. The step must fail; it must never let the job continue without its
+      # secrets.
+      - name: A job no role grants fails the step
         id: denied
+        continue-on-error: true
+        uses: ./
+        with:
+          api-url: ${{ env.E2E_API_URL }}
+          app-id: 00000000-0000-4000-8000-000000000000
+          environment: ${{ env.E2E_ENVIRONMENT }}
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
+
+      # The same for a legacy binding: the reserved binding id gets the opaque 401 of a refused job.
+      - name: A job no binding accepts fails the step
+        id: denied-binding
         continue-on-error: true
         uses: ./
         with:
@@ -126,10 +161,13 @@ jobs:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.E2E_TOKEN_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: e2e-runner-bearer
 
-      - name: ...and the failure was loud, not silent
+      - name: ...and both failures were loud, not silent
         env:
           OUTCOME: ${{ steps.denied.outcome }}
-        run: test "$OUTCOME" = "failure"
+          OUTCOME_BINDING: ${{ steps.denied-binding.outcome }}
+        run: |
+          test "$OUTCOME" = "failure"
+          test "$OUTCOME_BINDING" = "failure"
 
   # An action's metadata is only validated when a workflow tries to use it, which is far too late
   # for a customer. Parsing it here fails the PR instead.
