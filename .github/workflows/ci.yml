@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 # Read only. Pull requests run with this token, so it may never write, and no job requests an
 # id-token: the smoke test points the CLI at a stand-in token service instead.
