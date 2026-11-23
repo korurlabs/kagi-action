@@ -1,6 +1,6 @@
 {
   "name": "kagi-action",
-  "version": "3.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "GitHub Action that installs the checksum-verified Kagi CLI and loads the secrets a Kagi workload role grants the job, with its own OIDC id-token",
   "type": "module",
