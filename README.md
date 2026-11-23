@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
+      - uses: korurlabs/kagi-action@<full commit sha> # v3.x.y
         with:
           app-id: 6d8f6d80-4e21-469d-907d-b13773f4e284
           environment: production
@@ -87,7 +87,7 @@ actions. To give them to one command only, install the CLI without pulling and w
 in `kagi run`. Nothing is written to disk or to `$GITHUB_ENV`:
 
 ```yaml
-      - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
+      - uses: korurlabs/kagi-action@<full commit sha> # v3.x.y
         with:
           pull: 'false'
 
@@ -140,7 +140,7 @@ ones under the GitHub Actions connection only so they can be deleted. A job that
 keeps working with `binding-id`:
 
 ```yaml
-      - uses: korurlabs/kagi-action@<full commit sha> # v2.x.y
+      - uses: korurlabs/kagi-action@<full commit sha> # v3.x.y
         with:
           binding-id: 3fa2c1e0-0000-4000-8000-000000000000
 ```
@@ -180,22 +180,23 @@ prefer `kagi run` over `--github-env` where you can.
 
 ## Upgrading
 
-### From v2.0.0
+### From v2
 
-v2.1.0 pins Kagi CLI 0.33.0 and reads through workload roles. A v2.0.0 step without inputs let Kagi
-find a CI binding from the job's claims; that step now fails with a message asking for `app-id` and
-`environment`. Either create a workload role and set those two inputs, or set `binding-id` to keep
-the binding for now.
+v2 steps with no inputs relied on Kagi finding a CI binding from the job's claims. v3 pins Kagi CLI
+0.33.0, which reads workload roles and needs `app-id` and `environment`. A v2 step without inputs now
+fails with a message asking for both. Create a workload role and set those two inputs. Legacy
+bindings keep working only with `binding-id`. Move the pin from `korurlabs/kagi-action@v2` to
+`korurlabs/kagi-action@v3`.
 
 ### From v1
 
 v1 stops working against the current Kagi API: it called `POST /kagi/auth/ci/fetch`, which Kagi
-replaced. Move to v2:
+replaced. Move to v3:
 
 - Create a workload role and set `app-id` and `environment`.
-- Remove `export-env`, `env-file-path`, `request-timeout-seconds` and `mask`; v2 does not have them.
+- Remove `export-env`, `env-file-path`, `request-timeout-seconds` and `mask`; v3 does not have them.
   For a file, use `kagi pull --out-file` as shown above.
-- Remove any use of the outputs `secret-count`, `scope-count` and `env-file`; v2 has no outputs.
+- Remove any use of the outputs `secret-count`, `scope-count` and `env-file`; v3 has no outputs.
 
 ## The pinned CLI
 
@@ -219,13 +220,13 @@ and commit it.
 
 | Reference | Meaning |
 |---|---|
-| `@<full commit sha> # v2.x.y` | Exact commit. Recommended. |
-| `@v2.x.y`, for example `@v2.0.0` | Exact release tag. |
-| `@v2` | The first v2 release, `v2.0.0`. It never moves, so it never receives a fix. |
+| `@<full commit sha> # v3.x.y` | Exact commit. Recommended. |
+| `@v3.x.y`, for example `@v3.0.0` | Exact release tag. |
+| `@v3` | The first v3 release, `v3.0.0`. It never moves, so it never receives a fix. |
 
-This repository never moves a release tag, and that includes `v2`: it is created once, on the
-commit of `v2.0.0`. A fix ships as a new `v2.x.y` tag, and a workflow gets it by changing its pin.
-Pin a full commit SHA or a `v2.x.y` tag. Breaking changes ship only in a new major version.
+This repository never moves a release tag, and that includes `v3`: it is created once, on the
+commit of `v3.0.0`. A fix ships as a new `v3.x.y` tag, and a workflow gets it by changing its pin.
+Pin a full commit SHA or a `v3.x.y` tag. Breaking changes ship only in a new major version.
 Dependabot with `package-ecosystem: github-actions` opens a pull request for a pinned action when
 a new release ships, and it updates the version comment next to a SHA.
 

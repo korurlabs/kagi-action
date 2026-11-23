@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      # Release tags only. The major tag (v2) does not match, so creating it starts no release.
+      # Release tags only. The major tag (v3) does not match, so creating it starts no release.
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
