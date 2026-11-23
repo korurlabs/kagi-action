@@ -1,9 +1,10 @@
 /**
  * Runs the installed Kagi CLI.
  *
- * The CLI does all of the CI work itself: it requests the job's OIDC id-token, exchanges it,
- * reads what the job's binding gives once, masks every value and writes $GITHUB_ENV. This module
- * only starts it with the right arguments and environment and reports how it ended.
+ * The CLI does all of the CI work itself: it requests the job's OIDC id-token, exchanges it for a
+ * Kagi token (for the app environment a workload role grants, or for what a legacy CI binding
+ * gives), reads the secrets once, masks every value and writes $GITHUB_ENV. This module only starts
+ * it with the right arguments and environment and reports how it ended.
  *
  * The CLI's stdout and stderr are inherited, never piped, buffered or silenced. The CLI writes its
  * ::add-mask:: and ::warning:: workflow commands to stderr, and the runner reads workflow commands
@@ -19,8 +20,24 @@
 import { spawn } from 'node:child_process';
 import { ActionError } from './core.js';
 
-/** Writes the binding's secrets into $GITHUB_ENV for the later steps of the job. */
+/** Writes the secrets into $GITHUB_ENV for the later steps of the job. */
 export const PULL_ARGS = Object.freeze(['pull', '--github-env']);
+
+/**
+ * The arguments of the main step's pull.
+ *
+ * With a workload role, the job asks for one app environment, and the roles of the organization
+ * decide whether it gets it. `--identity github` makes the CLI use the job's id-token and nothing
+ * else: without it, a job that lacks `id-token: write` would go on to the runner's cloud metadata
+ * endpoint or a stored session instead of failing with the permission to add.
+ *
+ * With a legacy CI binding, the binding decides what the job gets, and the CLI refuses any flag
+ * that selects secrets, so the pull takes none.
+ */
+export function pullArgs({ bindingId, appId, environment }) {
+  if (bindingId) return [...PULL_ARGS];
+  return [...PULL_ARGS, '--identity', 'github', '--app-id', appId, '--env', environment];
+}
 
 /** Revokes the GitHub tokens that any `kagi pull` of this job minted and kept under $RUNNER_TEMP. */
 export const REVOKE_ARGS = Object.freeze(['ci', 'revoke']);
@@ -30,14 +47,18 @@ export const CLI_STDIO = Object.freeze(['ignore', 'inherit', 'inherit']);
 
 /**
  * The environment the CLI runs with: the step's own, plus the action's inputs under the variables
- * CI mode reads. KAGI_API_URL is always set, because in CI mode the CLI ignores the api-url of a
- * checked-out kagi.yaml and uses only KAGI_API_URL or its production default. The binding id and
- * the audience are set only when given, so an empty input never overrides a value the workflow put
- * in the step's environment, and Kagi finds the binding from the job's claims when none is named.
+ * the CLI reads. KAGI_API_URL is always set, because a job's id-token goes only to KAGI_API_URL or
+ * the production API, never to the api-url of a checked-out kagi.yaml. The audience is set only when
+ * given, so an empty input never overrides a value the workflow put in the step's environment.
+ *
+ * KAGI_BINDING_ID selects the legacy CI binding path in the CLI. It is set from binding-id, and
+ * removed when binding-id is empty: a value left in the step's environment would turn a workload
+ * role pull into a binding pull, which the CLI then refuses for its --app-id and --env.
  */
 export function buildCliEnv(baseEnv, { apiUrl, bindingId, audience }) {
   const env = { ...baseEnv, KAGI_API_URL: apiUrl };
   if (bindingId) env.KAGI_BINDING_ID = bindingId;
+  else delete env.KAGI_BINDING_ID;
   if (audience) env.KAGI_AUDIENCE = audience;
   return env;
 }

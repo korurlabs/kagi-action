@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      # Release tags only. The major tag (v2) does not match, so creating it starts no release.
+      # Release tags only. The major tag (v3) does not match, so creating it starts no release.
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
@@ -31,9 +31,10 @@ jobs:
           node-version: '24'
       - run: npm test
 
-  # Gate: the action runs `kagi pull --github-env` and, in its post step, `kagi ci revoke`. A CLI
-  # release from before CI mode has neither, so a tag whose src/cli-release.json pins one would
-  # ship an action that fails in every job. This installs the pinned CLI through the action itself
+  # Gate: the action runs `kagi pull --github-env --identity github --app-id <id> --env <slug>`
+  # and, in its post step, `kagi ci revoke`. A CLI release from before workload identity lacks
+  # some of them, so a tag whose src/cli-release.json pins one would ship an action that fails in
+  # every job. This installs the pinned CLI through the action itself
   # and runs both commands; `kagi ci revoke` exits 0 when there is nothing to revoke.
   cli-ci-mode:
     name: the pinned Kagi CLI has CI mode
@@ -56,6 +57,9 @@ jobs:
           kagi ci revoke
           help="$(kagi pull --help)"
           grep -q -- '--github-env' <<<"$help"
+          # A workload role pull passes these; a CLI from before workload identity has neither.
+          grep -q -- '--identity' <<<"$help"
+          grep -q -- '--app-id' <<<"$help"
 
   release:
     name: publish the release

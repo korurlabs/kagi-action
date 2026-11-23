@@ -1,26 +1,41 @@
 name: 'Kagi Secrets'
 description: >-
-  Load the secrets this workflow's Kagi CI binding gives, with the job's own OIDC id-token. No
-  stored credential: installs the checksum-verified Kagi CLI and runs its CI mode.
+  Load the secrets of a Kagi app environment that a Kagi workload role grants this workflow, with
+  the job's own OIDC id-token. No stored credential: installs the checksum-verified Kagi CLI and
+  runs it.
 author: 'Korur'
 
 branding:
   icon: 'lock'
   color: 'purple'
 
-# Every input is optional: a job with `permissions: id-token: write` needs none of them.
+# No input is marked required, so the runner never rejects a step before the action can say what is
+# missing. The action itself requires app-id and environment when it pulls without a binding-id.
 inputs:
+  app-id:
+    description: >-
+      The id (a UUID) of the Kagi app whose secrets this job reads. A workload role of the
+      organization must grant this job that app's environment. Required with environment when the
+      action pulls, unless binding-id is set.
+    required: false
+    default: ''
+  environment:
+    description: >-
+      The slug of the app environment to read, such as production. Required with app-id when the
+      action pulls, unless binding-id is set.
+    required: false
+    default: ''
   binding-id:
     description: >-
-      The id of the Kagi CI binding to evaluate. Leave it unset: Kagi finds the binding from the
-      job's own claims. Needed only for a binding with a custom audience, which Kagi reaches only by
-      its id. It is a reference, not a credential.
+      Legacy. The id of a Kagi CI binding. Set it only for a job that still reads through a CI
+      binding created before workload roles; the binding then decides what the job gets, and
+      app-id and environment must be unset. New CI bindings can no longer be created.
     required: false
     default: ''
   audience:
     description: >-
-      Audience of the GitHub id-token. Leave it unset to use the Kagi CLI's default, the host of api-url (api.kagi.pw by default).
-      Set it, together with binding-id, only for a binding that pins its own expected audience.
+      Audience of the GitHub id-token. Leave it unset to use the Kagi CLI's default, the host of
+      api-url (api.kagi.pw by default). Set it only when your Kagi deployment expects another one.
     required: false
     default: ''
   api-url:
@@ -36,10 +51,10 @@ inputs:
     default: ''
   pull:
     description: >-
-      Run `kagi pull --github-env`, which puts the binding's secrets into the environment of every
-      later step of this job. Set it to false to only install the CLI, and run
-      `kagi run -- <command>` in the step that needs the secrets, which hands them to that one
-      command.
+      Run `kagi pull --github-env`, which puts the secrets into the environment of every later step
+      of this job. Set it to false to only install the CLI, and run
+      `kagi run --identity github --app-id <id> --env <slug> -- <command>` in the step that needs the
+      secrets, which hands them to that one command.
     required: false
     default: 'true'
 
