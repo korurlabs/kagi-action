@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: korurlabs/kagi-action@<full commit sha> # v3.x.y
+      - uses: korurlabs/kagi-action@v0.1.0
         with:
           app-id: 6d8f6d80-4e21-469d-907d-b13773f4e284
           environment: production
@@ -54,8 +54,9 @@ jobs:
       - run: ./deploy.sh   # the app environment's secrets are now in this step's environment
 ```
 
-Pin the action to a full commit SHA and keep its release tag in a comment, as above. This action
-handles your secrets, and a commit SHA names exactly one tree of code. See [Versioning](#versioning).
+For production, pin the action to a full commit SHA and keep its release tag in a comment
+(`korurlabs/kagi-action@<full commit sha> # v0.1.0`). This action handles your secrets, and a commit
+SHA names exactly one tree of code. See [Versioning](#versioning).
 
 ## What the action does
 
@@ -87,7 +88,7 @@ actions. To give them to one command only, install the CLI without pulling and w
 in `kagi run`. Nothing is written to disk or to `$GITHUB_ENV`:
 
 ```yaml
-      - uses: korurlabs/kagi-action@<full commit sha> # v3.x.y
+      - uses: korurlabs/kagi-action@v0.1.0
         with:
           pull: 'false'
 
@@ -140,7 +141,7 @@ ones under the GitHub Actions connection only so they can be deleted. A job that
 keeps working with `binding-id`:
 
 ```yaml
-      - uses: korurlabs/kagi-action@<full commit sha> # v3.x.y
+      - uses: korurlabs/kagi-action@v0.1.0
         with:
           binding-id: 3fa2c1e0-0000-4000-8000-000000000000
 ```
@@ -178,26 +179,6 @@ prefer `kagi run` over `--github-env` where you can.
 - A runner that supports `runs.using: node24` (v2.327.0 or newer). Every GitHub-hosted runner does;
   self-hosted runners may need updating.
 
-## Upgrading
-
-### From v2
-
-v2 steps with no inputs relied on Kagi finding a CI binding from the job's claims. v3 pins Kagi CLI
-0.33.0, which reads workload roles and needs `app-id` and `environment`. A v2 step without inputs now
-fails with a message asking for both. Create a workload role and set those two inputs. Legacy
-bindings keep working only with `binding-id`. Move the pin from `korurlabs/kagi-action@v2` to
-`korurlabs/kagi-action@v3`.
-
-### From v1
-
-v1 stops working against the current Kagi API: it called `POST /kagi/auth/ci/fetch`, which Kagi
-replaced. Move to v3:
-
-- Create a workload role and set `app-id` and `environment`.
-- Remove `export-env`, `env-file-path`, `request-timeout-seconds` and `mask`; v3 does not have them.
-  For a file, use `kagi pull --out-file` as shown above.
-- Remove any use of the outputs `secret-count`, `scope-count` and `env-file`; v3 has no outputs.
-
 ## The pinned CLI
 
 `src/cli-release.json` holds the Kagi CLI version this release installs and the SHA-256 of each of
@@ -218,15 +199,13 @@ and commit it.
 
 ## Versioning
 
-| Reference | Meaning |
-|---|---|
-| `@<full commit sha> # v3.x.y` | Exact commit. Recommended. |
-| `@v3.x.y`, for example `@v3.0.0` | Exact release tag. |
-| `@v3` | The first v3 release, `v3.0.0`. It never moves, so it never receives a fix. |
+The action is pre-1.0. A minor release (`0.x`) may break a workflow, so pin an exact version
+(`@v0.1.0`) or, better, a full commit SHA with the version in a comment. There is no moving `v0`
+tag. This repository never moves a release tag; a fix ships as a new `v0.x.y` tag, and a workflow
+gets it by changing its pin.
 
-This repository never moves a release tag, and that includes `v3`: it is created once, on the
-commit of `v3.0.0`. A fix ships as a new `v3.x.y` tag, and a workflow gets it by changing its pin.
-Pin a full commit SHA or a `v3.x.y` tag. Breaking changes ship only in a new major version.
+The tags `v1`, `v2` and `v3` (and their releases) were early tags and are withdrawn. Do not pin them.
+
 Dependabot with `package-ecosystem: github-actions` opens a pull request for a pinned action when
 a new release ships, and it updates the version comment next to a SHA.
 

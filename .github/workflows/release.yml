@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      # Release tags only. The major tag (v3) does not match, so creating it starts no release.
+      # Release tags only. A major tag (such as v1) does not match, so creating it starts no release.
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
@@ -97,8 +97,12 @@ jobs:
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
           # Only vN.0.0 itself creates the major tag; a prerelease such as v3.0.0-rc.1 never does.
-          if [ "$MINOR" = "0" ] && [ "$PATCH" = "0" ] && [ -z "$PRERELEASE" ]; then
+          # A 0.x minor may break, so major 0 never gets a v0 tag.
+          if [ "$MAJOR" = "0" ]; then
+            echo "first-of-major=false" >> "$GITHUB_OUTPUT"
+          elif [ "$MINOR" = "0" ] && [ "$PATCH" = "0" ] && [ -z "$PRERELEASE" ]; then
             echo "first-of-major=true" >> "$GITHUB_OUTPUT"
           else
             echo "first-of-major=false" >> "$GITHUB_OUTPUT"
@@ -134,8 +138,16 @@ jobs:
           echo "$TAG points at $commit, which is on main."
 
       - name: Verify the published tree is a usable action
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          # package.json carries the release version; a tag that disagrees was cut from the wrong commit.
+          pkg="$(python3 -c "import json;print(json.load(open('package.json'))['version'].split('-')[0])")"
+          if [ "$pkg" != "$VERSION" ]; then
+            echo "::error::package.json says $pkg, but the tag is v$VERSION."
+            exit 1
+          fi
           # The tag is what customers fetch; if an entry point named by action.yml is not in the
           # tree, every consumer fails at step start with an unhelpful runner error.
           test -f action.yml
@@ -156,6 +168,10 @@ jobs:
           COMMIT: ${{ steps.commit.outputs.commit }}
         run: |
           set -euo pipefail
+          if [ "$MAJOR" = "v0" ]; then
+            echo "Pre-1.0 release: no v0 major tag is created."
+            exit 0
+          fi
           existing="$(git rev-parse --verify --quiet "refs/tags/${MAJOR}^{commit}" || true)"
           if [ "$FIRST_OF_MAJOR" != "true" ]; then
             if [ -n "$existing" ]; then
