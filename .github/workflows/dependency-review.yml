@@ -19,12 +19,19 @@ name: Dependency review
 # ruleset requires the check by that name. Renaming either one leaves the
 # ruleset waiting for a check that never reports.
 #
+# Merge queue: on `merge_group` it compares main with the queued merge commit,
+# which holds every pull request ahead of it in the queue, and fails on the same
+# terms. It posts no comment there, as no single pull request is in context.
+# The queue needs this run, because the ruleset requires the check.
+#
 # Fork safety: `pull_request` only (never `pull_request_target`), so a run from
 # a fork gets a read-only token and no secret, and it cannot post the comment.
+# A `merge_group` run starts only for a pull request that was approved and queued.
 
 on:
   pull_request:
     branches: [main]
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
